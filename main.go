@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/santhosh-tekuri/jsonschema"
+	"io"
 	"log"
 	"net/http"
-	"os"
+	"reflect"
 )
 
 type App struct {
@@ -54,22 +56,34 @@ func (a *App) uploadSchema(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
 
-	// To be removed/changed.
-	_, err := jsonschema.Compile("resources/config-schema.json")
+	// Seeing what happens when I print all variables.
+	for k, v := range mux.Vars(r) {
+		log.Printf("key=%v, value=%v", k, v)
+	}
+
+	requestBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.Write(createErrorResponse(w, vars["schemaid"]))
+	}
+	fmt.Println(string(requestBody))
+
+	// Clean JSON to remove null values.
+	var nullsRemoved = removeNulls(toJsonMap(requestBody))
+	cleanJson, err := json.Marshal(nullsRemoved)
+	fmt.Println(string(cleanJson))
+
+	// Checks if JSON is valid. Here for now as playing with jsonschema.
+	validateJson(w, nullsRemoved, vars["schemaid"])
 
 	if err != nil {
 		w.Write(createErrorResponse(w, vars["schemaid"]))
 	}
-
-	f, err := os.Open("resources/config-schema.json")
-	if err != nil {
-		w.Write(createErrorResponse(w, vars["schemaid"]))
-	}
-	defer f.Close()
 
 	// Create the success response.
-	successResponse := SuccessResponse{"uploadSchema", vars["schemaid"], "success"}
+	successResponse := SuccessResponse{"uploadSchema", "config-schema", "success"}
 	response, err := json.Marshal(successResponse)
+
+	fmt.Printf(string(response))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -89,6 +103,7 @@ func (a *App) downloadSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) validateDocument(w http.ResponseWriter, r *http.Request) {
+
 }
 
 func createErrorResponse(w http.ResponseWriter, schemaId string) []byte {
@@ -102,4 +117,47 @@ func createErrorResponse(w http.ResponseWriter, schemaId string) []byte {
 	}
 
 	return response
+}
+
+func removeNulls(m map[string]interface{}) map[string]interface{} {
+
+	// I took this algorithm from https://www.ribice.ba/golang-null-values/ and modified it to return the map.
+	val := reflect.ValueOf(m)
+	for _, e := range val.MapKeys() {
+		v := val.MapIndex(e)
+		if v.IsNil() {
+			delete(m, e.String())
+			continue
+		}
+		switch t := v.Interface().(type) {
+		// If key is a JSON object (Go Map), use recursion to go deeper
+		case map[string]interface{}:
+			removeNulls(t)
+		}
+	}
+
+	return m
+}
+
+/**
+  Convert JSON to a JSON map.
+*/
+func toJsonMap(requestBody []byte) map[string]interface{} {
+	jsonMap := make(map[string]interface{})
+	err := json.Unmarshal(requestBody, &jsonMap)
+	if err != nil {
+		panic(err)
+	}
+
+	return jsonMap
+}
+
+func validateJson(w http.ResponseWriter, nullsRemoved map[string]interface{}, schemaId string) {
+	sch, err := jsonschema.Compile("resources/config-schema.json")
+	if err != nil {
+		w.Write(createErrorResponse(w, schemaId))
+	}
+	if err = sch.ValidateInterface(nullsRemoved); err != nil {
+		w.Write(createErrorResponse(w, schemaId))
+	}
 }
