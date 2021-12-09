@@ -50,73 +50,87 @@ func (a *App) initializeRoutes() {
 	a.Router.HandleFunc("/validate/{schemaid}", a.validateDocument).Methods("POST")
 }
 
-func (a *App) uploadSchema(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+/**
+Endpoint for the upload of a JSON schema.
+*/
+func (a *App) uploadSchema(responseWriter http.ResponseWriter, request *http.Request) {
 
-	vars := mux.Vars(r)
+	schemaId := mux.Vars(request)["schemaid"]
 
-	// Seeing what happens when I print all variables.
-	for k, v := range mux.Vars(r) {
-		log.Printf("key=%v, value=%v", k, v)
-	}
-
-	requestBody, err := io.ReadAll(r.Body)
+	// Check if JSON exists in the body.
+	requestBody, err := io.ReadAll(request.Body)
 	if err != nil {
-		w.Write(createErrorResponse(w, vars["schemaid"]))
+		createErrorResponse(responseWriter, schemaId)
+		return
 	}
-	fmt.Println(string(requestBody))
+
+	// Check if uploaded JSON is valid.
+	if toJsonMap(requestBody) == nil {
+		createErrorResponse(responseWriter, schemaId)
+		return
+	}
+
+	// Save the schema to the disk.
+
+	// No errors... Create the success response.
+	createSuccessResponse(responseWriter, schemaId)
+}
+
+func (a *App) downloadSchema(w http.ResponseWriter, r *http.Request) {
+}
+
+func (a *App) validateDocument(responseWriter http.ResponseWriter, request *http.Request) {
+
+	schemaId := mux.Vars(request)["schemaid"]
+
+	// Check if JSON exists in the body.
+	requestBody, err := io.ReadAll(request.Body)
+	if err != nil {
+		createErrorResponse(responseWriter, schemaId)
+		return
+	}
 
 	// Clean JSON to remove null values.
 	var nullsRemoved = removeNulls(toJsonMap(requestBody))
 	cleanJson, err := json.Marshal(nullsRemoved)
 	fmt.Println(string(cleanJson))
 
-	// Checks if JSON is valid. Here for now as playing with jsonschema.
-	validateJson(w, nullsRemoved, vars["schemaid"])
-
-	if err != nil {
-		w.Write(createErrorResponse(w, vars["schemaid"]))
-	}
-
-	// Create the success response.
-	successResponse := SuccessResponse{"uploadSchema", "config-schema", "success"}
-	response, err := json.Marshal(successResponse)
-
-	fmt.Printf(string(response))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// Check if uploaded JSON is valid.
+	if validateJsonSchema(toJsonMap(cleanJson)) != true {
+		createErrorResponse(responseWriter, schemaId)
 		return
 	}
-	w.Write(response)
+
+	// No errors... Create the success response.
+	createSuccessResponse(responseWriter, schemaId)
 }
 
-func (a *App) downloadSchema(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	vars := mux.Vars(r)
-
-	var response = "Endpoint " + vars["schemaid"]
-
-	w.Write([]byte(response))
-}
-
-func (a *App) validateDocument(w http.ResponseWriter, r *http.Request) {
-
-}
-
-func createErrorResponse(w http.ResponseWriter, schemaId string) []byte {
+func createErrorResponse(responseWriter http.ResponseWriter, schemaId string) {
+	responseWriter.Header().Set("Content-Type", "application/json")
+	responseWriter.WriteHeader(http.StatusInternalServerError)
 
 	errorResponse := ErrorResponse{"uploadSchema", schemaId, "error", "Invalid JSON"}
 
 	response, err := json.Marshal(errorResponse)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return nil
+		createErrorResponse(responseWriter, schemaId)
 	}
 
-	return response
+	responseWriter.Write(response)
+}
+
+func createSuccessResponse(responseWriter http.ResponseWriter, schemaId string) {
+	responseWriter.Header().Set("Content-Type", "application/json")
+	responseWriter.WriteHeader(http.StatusCreated)
+
+	successResponse := SuccessResponse{"uploadSchema", "config-schema", "success"}
+
+	response, err := json.Marshal(successResponse)
+	if err != nil {
+		createErrorResponse(responseWriter, schemaId)
+	}
+
+	responseWriter.Write(response)
 }
 
 func removeNulls(m map[string]interface{}) map[string]interface{} {
@@ -140,24 +154,28 @@ func removeNulls(m map[string]interface{}) map[string]interface{} {
 }
 
 /**
-  Convert JSON to a JSON map.
+  Convert JSON to a JSON map. This will return null if the JSON is invalid.
 */
 func toJsonMap(requestBody []byte) map[string]interface{} {
 	jsonMap := make(map[string]interface{})
 	err := json.Unmarshal(requestBody, &jsonMap)
+
 	if err != nil {
-		panic(err)
+		return nil
 	}
 
 	return jsonMap
 }
 
-func validateJson(w http.ResponseWriter, nullsRemoved map[string]interface{}, schemaId string) {
+func validateJsonSchema(nullsRemoved map[string]interface{}) bool {
 	sch, err := jsonschema.Compile("resources/config-schema.json")
 	if err != nil {
-		w.Write(createErrorResponse(w, schemaId))
+		return false
 	}
+
 	if err = sch.ValidateInterface(nullsRemoved); err != nil {
-		w.Write(createErrorResponse(w, schemaId))
+		return false
 	}
+
+	return true
 }
