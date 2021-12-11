@@ -6,8 +6,10 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/santhosh-tekuri/jsonschema"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"reflect"
 )
 
@@ -70,13 +72,25 @@ func (a *App) uploadSchema(responseWriter http.ResponseWriter, request *http.Req
 		return
 	}
 
-	// Save the schema to the disk.
+	// Save the JSON to the disk.
+	ioutil.WriteFile("json-uploads/"+schemaId+".json", requestBody, os.ModePerm)
 
 	// No errors... Create the success response.
 	createSuccessResponse(responseWriter, schemaId)
 }
 
-func (a *App) downloadSchema(w http.ResponseWriter, r *http.Request) {
+func (a *App) downloadSchema(responseWriter http.ResponseWriter, request *http.Request) {
+
+	schemaId := mux.Vars(request)["schemaid"]
+
+	// Get the JSON file from the disk.
+	file, err := ioutil.ReadFile("json-uploads/" + schemaId + ".json")
+
+	if err != nil {
+		createErrorResponse(responseWriter, schemaId)
+	}
+
+	responseWriter.Write(file)
 }
 
 func (a *App) validateDocument(responseWriter http.ResponseWriter, request *http.Request) {
@@ -123,7 +137,7 @@ func createSuccessResponse(responseWriter http.ResponseWriter, schemaId string) 
 	responseWriter.Header().Set("Content-Type", "application/json")
 	responseWriter.WriteHeader(http.StatusCreated)
 
-	successResponse := SuccessResponse{"uploadSchema", "config-schema", "success"}
+	successResponse := SuccessResponse{"uploadSchema", schemaId, "success"}
 
 	response, err := json.Marshal(successResponse)
 	if err != nil {
