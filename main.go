@@ -17,12 +17,14 @@ type App struct {
 	Router *mux.Router
 }
 
+// SuccessResponse Struct for storing a successful response.
 type SuccessResponse struct {
 	Action string `json:"Action"`
 	ID     string `json:"ID"`
 	Status string `json:"Status"`
 }
 
+// ErrorResponse Struct for storing a successful response.
 type ErrorResponse struct {
 	Action  string `json:"Action"`
 	ID      string `json:"ID"`
@@ -46,15 +48,16 @@ func (a *App) Run(addr string) {
 	log.Fatal(http.ListenAndServe(addr, a.Router))
 }
 
+// initializeRoutes Initialize our end points.
 func (a *App) initializeRoutes() {
 	a.Router.HandleFunc("/schema/{schemaid}", a.uploadSchema).Methods("POST")
 	a.Router.HandleFunc("/schema/{schemaid}", a.downloadSchema).Methods("GET")
 	a.Router.HandleFunc("/validate/{schemaid}", a.validateDocument).Methods("POST")
 }
 
-/**
-Endpoint for the upload of a JSON schema.
-*/
+// uploadSchema Endpoint for the upload of a JSON schema.
+//
+// Returns a success or error response.
 func (a *App) uploadSchema(responseWriter http.ResponseWriter, request *http.Request) {
 
 	schemaId := mux.Vars(request)["schemaid"]
@@ -79,6 +82,9 @@ func (a *App) uploadSchema(responseWriter http.ResponseWriter, request *http.Req
 	createSuccessResponse(responseWriter, schemaId)
 }
 
+// downloadSchema Endpoint for the download of a JSON schema.
+//
+// Returns a success or error response.
 func (a *App) downloadSchema(responseWriter http.ResponseWriter, request *http.Request) {
 
 	schemaId := mux.Vars(request)["schemaid"]
@@ -93,6 +99,9 @@ func (a *App) downloadSchema(responseWriter http.ResponseWriter, request *http.R
 	responseWriter.Write(file)
 }
 
+// validateDocument Endpoint for the validation of a JSON document against a JSON schema.
+//
+// Returns a success or error response.
 func (a *App) validateDocument(responseWriter http.ResponseWriter, request *http.Request) {
 
 	schemaId := mux.Vars(request)["schemaid"]
@@ -119,20 +128,7 @@ func (a *App) validateDocument(responseWriter http.ResponseWriter, request *http
 	createSuccessResponse(responseWriter, schemaId)
 }
 
-func createErrorResponse(responseWriter http.ResponseWriter, schemaId string) {
-	responseWriter.Header().Set("Content-Type", "application/json")
-	responseWriter.WriteHeader(http.StatusInternalServerError)
-
-	errorResponse := ErrorResponse{"uploadSchema", schemaId, "error", "Invalid JSON"}
-
-	response, err := json.Marshal(errorResponse)
-	if err != nil {
-		createErrorResponse(responseWriter, schemaId)
-	}
-
-	responseWriter.Write(response)
-}
-
+// createSuccessResponse Helper method to create a success response.
 func createSuccessResponse(responseWriter http.ResponseWriter, schemaId string) {
 	responseWriter.Header().Set("Content-Type", "application/json")
 	responseWriter.WriteHeader(http.StatusCreated)
@@ -147,14 +143,31 @@ func createSuccessResponse(responseWriter http.ResponseWriter, schemaId string) 
 	responseWriter.Write(response)
 }
 
-func removeNulls(m map[string]interface{}) map[string]interface{} {
+// createErrorResponse Helper method to create an error response.
+func createErrorResponse(responseWriter http.ResponseWriter, schemaId string) {
+	responseWriter.Header().Set("Content-Type", "application/json")
+	responseWriter.WriteHeader(http.StatusInternalServerError)
 
-	// I took this algorithm from https://www.ribice.ba/golang-null-values/ and modified it to return the map.
-	val := reflect.ValueOf(m)
+	errorResponse := ErrorResponse{"uploadSchema", schemaId, "error", "Invalid JSON"}
+
+	response, err := json.Marshal(errorResponse)
+	if err != nil {
+		createErrorResponse(responseWriter, schemaId)
+	}
+
+	responseWriter.Write(response)
+}
+
+// removeNulls Remove all nulls from a JSON map.
+func removeNulls(jsonMap map[string]interface{}) map[string]interface{} {
+
+	// This bit was borrowed from a tutorial on https://www.ribice.ba/golang-null-values/
+	// I modified it slightly to return the map.
+	val := reflect.ValueOf(jsonMap)
 	for _, e := range val.MapKeys() {
 		v := val.MapIndex(e)
 		if v.IsNil() {
-			delete(m, e.String())
+			delete(jsonMap, e.String())
 			continue
 		}
 		switch t := v.Interface().(type) {
@@ -164,12 +177,10 @@ func removeNulls(m map[string]interface{}) map[string]interface{} {
 		}
 	}
 
-	return m
+	return jsonMap
 }
 
-/**
-  Convert JSON to a JSON map. This will return null if the JSON is invalid.
-*/
+// toJsonMap Convert JSON to a JSON map. This will return null if the JSON is invalid.
 func toJsonMap(requestBody []byte) map[string]interface{} {
 	jsonMap := make(map[string]interface{})
 	err := json.Unmarshal(requestBody, &jsonMap)
@@ -181,13 +192,16 @@ func toJsonMap(requestBody []byte) map[string]interface{} {
 	return jsonMap
 }
 
-func validateJsonSchema(nullsRemoved map[string]interface{}) bool {
+// validateJsonSchema Uses the jsonschema library to validate a JSON map against a JSON schema.
+//
+// Returns true if the JSON is valid, or false if not.
+func validateJsonSchema(jsonMap map[string]interface{}) bool {
 	sch, err := jsonschema.Compile("resources/config-schema.json")
 	if err != nil {
 		return false
 	}
 
-	if err = sch.ValidateInterface(nullsRemoved); err != nil {
+	if err = sch.ValidateInterface(jsonMap); err != nil {
 		return false
 	}
 
