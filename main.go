@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/santhosh-tekuri/jsonschema"
 	"io"
@@ -59,15 +58,8 @@ func (a *App) initializeRoutes() {
 //
 // Returns a success or error response.
 func (a *App) uploadSchema(responseWriter http.ResponseWriter, request *http.Request) {
-
 	schemaId := mux.Vars(request)["schemaid"]
-
-	// Check if JSON exists in the body.
-	requestBody, err := io.ReadAll(request.Body)
-	if err != nil {
-		createErrorResponse(responseWriter, schemaId)
-		return
-	}
+	requestBody, _ := io.ReadAll(request.Body)
 
 	// Check if uploaded JSON is valid.
 	if toJsonMap(requestBody) == nil {
@@ -76,10 +68,13 @@ func (a *App) uploadSchema(responseWriter http.ResponseWriter, request *http.Req
 	}
 
 	// Save the JSON to the disk.
-	ioutil.WriteFile("json-uploads/"+schemaId+".json", requestBody, os.ModePerm)
+	err := ioutil.WriteFile("json-uploads/"+schemaId+".json", requestBody, os.ModePerm)
+	if err != nil {
+		createErrorResponse(responseWriter, schemaId)
+	}
 
 	// No errors... Create the success response.
-	createSuccessResponse(responseWriter, schemaId)
+	createSuccessResponse(responseWriter, "uploadSchema", schemaId)
 }
 
 // downloadSchema Endpoint for the download of a JSON schema.
@@ -91,11 +86,12 @@ func (a *App) downloadSchema(responseWriter http.ResponseWriter, request *http.R
 
 	// Get the JSON file from the disk.
 	file, err := ioutil.ReadFile("json-uploads/" + schemaId + ".json")
-
 	if err != nil {
 		createErrorResponse(responseWriter, schemaId)
 	}
 
+	responseWriter.Header().Set("Content-Type", "application/json")
+	responseWriter.WriteHeader(http.StatusOK)
 	responseWriter.Write(file)
 }
 
@@ -103,42 +99,31 @@ func (a *App) downloadSchema(responseWriter http.ResponseWriter, request *http.R
 //
 // Returns a success or error response.
 func (a *App) validateDocument(responseWriter http.ResponseWriter, request *http.Request) {
-
 	schemaId := mux.Vars(request)["schemaid"]
-
-	// Check if JSON exists in the body.
-	requestBody, err := io.ReadAll(request.Body)
-	if err != nil {
-		createErrorResponse(responseWriter, schemaId)
-		return
-	}
+	requestBody, _ := io.ReadAll(request.Body)
 
 	// Clean JSON to remove null values.
 	var nullsRemoved = removeNulls(toJsonMap(requestBody))
-	cleanJson, err := json.Marshal(nullsRemoved)
-	fmt.Println(string(cleanJson))
 
 	// Check if uploaded JSON is valid.
-	if validateJsonSchema(toJsonMap(cleanJson)) != true {
+	cleanJson, _ := json.Marshal(nullsRemoved)
+	if validateJsonSchema(toJsonMap(cleanJson), schemaId) != true {
 		createErrorResponse(responseWriter, schemaId)
 		return
 	}
 
 	// No errors... Create the success response.
-	createSuccessResponse(responseWriter, schemaId)
+	createSuccessResponse(responseWriter, "validateDocument", schemaId)
 }
 
 // createSuccessResponse Helper method to create a success response.
-func createSuccessResponse(responseWriter http.ResponseWriter, schemaId string) {
+func createSuccessResponse(responseWriter http.ResponseWriter, action string, schemaId string) {
 	responseWriter.Header().Set("Content-Type", "application/json")
 	responseWriter.WriteHeader(http.StatusCreated)
 
-	successResponse := SuccessResponse{"uploadSchema", schemaId, "success"}
+	successResponse := SuccessResponse{action, schemaId, "success"}
 
-	response, err := json.Marshal(successResponse)
-	if err != nil {
-		createErrorResponse(responseWriter, schemaId)
-	}
+	response, _ := json.Marshal(successResponse)
 
 	responseWriter.Write(response)
 }
@@ -150,10 +135,7 @@ func createErrorResponse(responseWriter http.ResponseWriter, schemaId string) {
 
 	errorResponse := ErrorResponse{"uploadSchema", schemaId, "error", "Invalid JSON"}
 
-	response, err := json.Marshal(errorResponse)
-	if err != nil {
-		createErrorResponse(responseWriter, schemaId)
-	}
+	response, _ := json.Marshal(errorResponse)
 
 	responseWriter.Write(response)
 }
@@ -195,8 +177,8 @@ func toJsonMap(requestBody []byte) map[string]interface{} {
 // validateJsonSchema Uses the jsonschema library to validate a JSON map against a JSON schema.
 //
 // Returns true if the JSON is valid, or false if not.
-func validateJsonSchema(jsonMap map[string]interface{}) bool {
-	sch, err := jsonschema.Compile("resources/config-schema.json")
+func validateJsonSchema(jsonMap map[string]interface{}, schemaId string) bool {
+	sch, err := jsonschema.Compile("json-uploads/" + schemaId + ".json")
 	if err != nil {
 		return false
 	}
